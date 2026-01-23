@@ -15,7 +15,8 @@ from pystray import Icon, MenuItem, Menu
 from PIL import Image, ImageDraw
 
 import tkinter as tk
-from tkinter import BOTH, X, LEFT, RIGHT, END
+from tkinter import BOTH, X, LEFT, RIGHT, END, BOTTOM, TOP
+from tkinter import font
 
 try:
     import ttkbootstrap as ttk
@@ -28,6 +29,7 @@ except ImportError:
 from config import Config
 from src.constants import VERSION, LANGUAGES
 from src.core.translation import TranslationService
+from src.core.api_manager import AIAPIManager
 from src.core.hotkey import HotkeyManager
 from src.ui.settings import SettingsWindow
 from src.ui.dialogs import APIErrorDialog
@@ -72,9 +74,14 @@ class TranslatorApp:
         # Dragging state
         self._drag_x = 0
         self._drag_y = 0
+        self._last_mouse_x = 0
+        self._last_mouse_y = 0
 
     def _on_hotkey_translate(self, language: str):
         """Handle hotkey translation request."""
+        # Capture mouse position immediately when hotkey is pressed
+        self._last_mouse_x = self.root.winfo_pointerx()
+        self._last_mouse_y = self.root.winfo_pointery()
         self.root.after(0, lambda: self.show_loading_tooltip(language))
         self.translation_service.do_translation(language)
 
@@ -97,37 +104,89 @@ class TranslatorApp:
         ttk.Label(frame, text=f"⏳ Translating to {target_lang}...",
                  font=('Segoe UI', 10), foreground='#ffffff', background='#2b2b2b').pack()
 
-        mouse_x = self.root.winfo_pointerx()
-        mouse_y = self.root.winfo_pointery()
+        mouse_x = self._last_mouse_x
+        mouse_y = self._last_mouse_y
         self.tooltip.geometry(f"+{mouse_x + 15}+{mouse_y + 20}")
 
     def calculate_tooltip_size(self, text: str) -> Tuple[int, int]:
-        """Calculate optimal tooltip dimensions based on text content."""
+        """Calculate optimal tooltip dimensions based on text content using font measurement."""
         MAX_WIDTH = 800
-        MAX_HEIGHT = self.root.winfo_screenheight() - 100
-        MIN_WIDTH = 280
-        MIN_HEIGHT = 100
-        CHAR_WIDTH = 9
-        LINE_HEIGHT = 26
-        PADDING = 80
+        MAX_HEIGHT = self.root.winfo_screenheight() - 80
+        MIN_WIDTH = 320
+        MIN_HEIGHT = 120
+        
+        # Padding configuration
+        FRAME_PADDING = 30  # Total horizontal padding (15px * 2)
+        TEXT_MARGIN = 10    # Extra margin for scrollbar/safety
+        VERTICAL_PADDING = 100 # Increased: Header (20) + Footer (50) + Padding (30)
+        
+        # Create font object to measure text accurately
+        try:
+            ui_font = font.Font(family='Segoe UI', size=11)
+        except:
+            # Fallback if font creation fails
+            ui_font = font.Font(family='Arial', size=11)
+            
+        line_height = ui_font.metrics("linespace") + 2 # +2px for line spacing
 
-        char_count = len(text)
-        line_count = text.count('\n') + 1
+        # 1. Calculate Optimal Width
+        # Measure the longest line to determine ideal width
+        longest_line_width = 0
+        for line in text.split('\n'):
+            w = ui_font.measure(line)
+            if w > longest_line_width:
+                longest_line_width = w
+        
+        # Determine width: clamp between MIN and MAX
+        # Add padding to text width to get window width
+        ideal_width = longest_line_width + FRAME_PADDING + TEXT_MARGIN
+        width = max(MIN_WIDTH, min(ideal_width, MAX_WIDTH))
 
-        # Width calculation
-        if char_count < 35:
-            width = max(char_count * CHAR_WIDTH + 60, MIN_WIDTH)
-        elif char_count < 100:
-            width = min(450, MAX_WIDTH)
-        elif char_count < 300:
-            width = min(600, MAX_WIDTH)
-        else:
-            width = MAX_WIDTH
-
-        # Height calculation (add 1 extra line for better readability)
-        chars_per_line = max((width - 50) // CHAR_WIDTH, 1)
-        wrapped_lines = max(line_count, (char_count // chars_per_line) + 1) + 1  # +1 extra line
-        height = min(wrapped_lines * LINE_HEIGHT + PADDING, MAX_HEIGHT)
+        # 2. Calculate Height (Simulate Word Wrapping)
+        available_text_width = width - FRAME_PADDING - TEXT_MARGIN
+        
+        total_lines = 0
+        for paragraph in text.split('\n'):
+            # Empty lines count as 1
+            if not paragraph:
+                total_lines += 1
+                continue
+                
+            # Fast path: if paragraph fits in one line
+            if ui_font.measure(paragraph) <= available_text_width:
+                total_lines += 1
+                continue
+            
+            # Slow path: simulate word wrapping
+            current_line_width = 0
+            lines_in_para = 1
+            words = paragraph.split(' ')
+            space_width = ui_font.measure(' ')
+            
+            for word in words:
+                word_width = ui_font.measure(word)
+                
+                # Check if word fits on current line
+                if current_line_width + word_width <= available_text_width:
+                    current_line_width += word_width + space_width
+                else:
+                    # Word doesn't fit, wrap to next line
+                    lines_in_para += 1
+                    
+                    # Handle case where a single word is wider than the box
+                    if word_width > available_text_width:
+                        # It will wrap multiple times
+                        # Approximate extra lines for this huge word
+                        extra_lines = int(word_width / available_text_width)
+                        lines_in_para += extra_lines
+                        current_line_width = word_width % available_text_width
+                    else:
+                        current_line_width = word_width + space_width
+            
+            total_lines += lines_in_para
+        
+        # Calculate final height
+        height = (total_lines * line_height) + VERTICAL_PADDING
 
         return int(width), int(max(height, MIN_HEIGHT))
 
@@ -172,10 +231,6 @@ class TranslatorApp:
         self.tooltip.attributes('-topmost', True)
         self.tooltip.after(100, lambda: self.tooltip.attributes('-topmost', False) if self.tooltip else None)
 
-        # Bind dragging events to the window itself
-        self.tooltip.bind("<Button-1>", self._start_move)
-        self.tooltip.bind("<B1-Motion>", self._on_drag)
-
         # Main frame
         main_frame = ttk.Frame(self.tooltip, padding=15)
         main_frame.pack(fill=BOTH, expand=True)
@@ -184,27 +239,9 @@ class TranslatorApp:
         main_frame.bind("<Button-1>", self._start_move)
         main_frame.bind("<B1-Motion>", self._on_drag)
 
-        # Translation text with color for errors
-        text_height = max(1, (height - 80) // 26)
-        text_fg = '#ff6b6b' if is_error else '#ffffff'  # Light red for errors
-
-        self.tooltip_text = tk.Text(main_frame, wrap=tk.WORD,
-                                    bg='#3d1f1f' if is_error else '#2b2b2b',
-                                    fg=text_fg,
-                                    font=('Segoe UI', 11), relief='flat',
-                                    width=width // 9, height=text_height,
-                                    borderwidth=0, highlightthickness=0)
-        self.tooltip_text.insert('1.0', translated)
-        self.tooltip_text.config(state='disabled')
-        self.tooltip_text.pack(fill=BOTH, expand=True)
-
-        # Mouse wheel scroll
-        self.tooltip_text.bind('<MouseWheel>',
-            lambda e: self.tooltip_text.yview_scroll(int(-1*(e.delta/120)), "units"))
-
-        # Button frame
+        # Button frame (Create FIRST to ensure it stays at BOTTOM)
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=X, pady=(12, 0))
+        btn_frame.pack(side=BOTTOM, fill=X, pady=(12, 0))
 
         # Bind dragging events to the button frame
         btn_frame.bind("<Button-1>", self._start_move)
@@ -236,21 +273,74 @@ class TranslatorApp:
             close_btn_kwargs["bootstyle"] = "secondary"
         ttk.Button(btn_frame, **close_btn_kwargs).pack(side=RIGHT)
 
+        # Translation text with color for errors
+        text_height = max(1, (height - 80) // 26)
+        text_fg = '#ff6b6b' if is_error else '#ffffff'  # Light red for errors
+
+        self.tooltip_text = tk.Text(main_frame, wrap=tk.WORD,
+                                    bg='#3d1f1f' if is_error else '#2b2b2b',
+                                    fg=text_fg,
+                                    font=('Segoe UI', 11), relief='flat',
+                                    width=width // 9, height=text_height,
+                                    borderwidth=0, highlightthickness=0)
+        self.tooltip_text.insert('1.0', translated)
+        self.tooltip_text.config(state='disabled') # Read-only but selectable
+        self.tooltip_text.pack(side=TOP, fill=BOTH, expand=True)
+
+        # Mouse wheel scroll
+        self.tooltip_text.bind('<MouseWheel>',
+            lambda e: self.tooltip_text.yview_scroll(int(-1*(e.delta/120)), "units"))
+
         # Position near mouse
-        mouse_x = self.root.winfo_pointerx()
-        mouse_y = self.root.winfo_pointery()
+        # Use captured position from when hotkey was pressed
+        mouse_x = self._last_mouse_x
+        mouse_y = self._last_mouse_y
+        
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
+        taskbar_margin = 50  # Space for taskbar
 
+        # 1. Calculate X (Horizontal)
         x = mouse_x + 15
-        y = mouse_y + 20
-
-        if x + width > screen_width:
+        if x + width > screen_width - 10:
             x = mouse_x - width - 15
-        if y + height > screen_height:
-            y = mouse_y - height - 20
+        x = max(10, min(x, screen_width - width - 10))
 
-        self.tooltip.geometry(f"{width}x{height}+{x}+{y}")
+        # 2. Calculate Y (Vertical) and Adjust Height
+        # Default preference: Below the mouse
+        y = mouse_y + 20
+        
+        # Calculate safe area
+        safe_top = 10
+        safe_bottom = screen_height - taskbar_margin
+        max_safe_height = safe_bottom - safe_top
+        
+        # Case 1: Content is taller than the entire safe screen area
+        if height >= max_safe_height:
+            height = max_safe_height
+            y = safe_top
+        
+        # Case 2: Content fits on screen, but need to decide position relative to mouse
+        else:
+            space_below = safe_bottom - y
+            
+            if height <= space_below:
+                # Fits below perfectly
+                pass 
+            else:
+                # Try above
+                y_above = mouse_y - height - 20
+                if y_above >= safe_top:
+                    y = y_above
+                else:
+                    # Doesn't fit cleanly above or below -> Pin to bottom safe edge
+                    y = safe_bottom - height
+                    # Double check top edge
+                    if y < safe_top:
+                        y = safe_top
+                        height = max_safe_height
+
+        self.tooltip.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
 
         # Bindings
         self.tooltip.bind('<Escape>', lambda e: on_tooltip_close())
@@ -415,7 +505,7 @@ class TranslatorApp:
         list_frame = ttk.Frame(main_frame)
         list_frame.pack(fill=X, pady=(0, 15))
 
-        self.lang_listbox = tk.Listbox(list_frame, height=3, bg='#2b2b2b', fg='#ffffff',
+        self.lang_listbox = tk.Listbox(list_frame, height=2, bg='#2b2b2b', fg='#ffffff',
                                        font=('Segoe UI', 10), relief='flat',
                                        selectbackground='#0d6efd', selectforeground='white',
                                        activestyle='none', highlightthickness=0,
@@ -432,7 +522,7 @@ class TranslatorApp:
         ttk.Label(main_frame, text="Custom prompt (optional):",
                   font=('Segoe UI', 10)).pack(anchor='w')
 
-        self.custom_prompt_text = tk.Text(main_frame, height=4, wrap=tk.WORD,
+        self.custom_prompt_text = tk.Text(main_frame, height=2, wrap=tk.WORD,
                                           bg='#2b2b2b', fg='#cccccc',
                                           font=('Segoe UI', 10), relief='flat',
                                           padx=10, pady=10, insertbackground='white',
@@ -679,6 +769,7 @@ class TranslatorApp:
             # Build new menu items
             menu_items = [
                 MenuItem('Open Translator', self.show_main_window, default=True),
+                MenuItem('Settings', self.show_settings),
                 MenuItem('─────────────', lambda: None, enabled=False),
             ]
 
@@ -692,7 +783,6 @@ class TranslatorApp:
 
             menu_items.extend([
                 MenuItem('─────────────', lambda: None, enabled=False),
-                MenuItem('Settings', self.show_settings),
                 MenuItem('Quit', self.quit_app)
             ])
 
@@ -708,6 +798,7 @@ class TranslatorApp:
         # Build menu items dynamically from config
         menu_items = [
             MenuItem('Open Translator', self.show_main_window, default=True),
+            MenuItem('Settings', self.show_settings),
             MenuItem('─────────────', lambda: None, enabled=False),
         ]
 
@@ -722,7 +813,6 @@ class TranslatorApp:
 
         menu_items.extend([
             MenuItem('─────────────', lambda: None, enabled=False),
-            MenuItem('Settings', self.show_settings),
             MenuItem('Quit', self.quit_app)
         ])
 
@@ -847,6 +937,26 @@ class TranslatorApp:
         """Show API error dialog."""
         APIErrorDialog(self.root, on_open_settings=self.show_settings)
 
+    def _startup_api_check(self):
+        """Perform a one-time API check on startup and cache results."""
+        try:
+            api_keys = self.config.get_api_keys()
+            manager = AIAPIManager()
+            
+            for config in api_keys:
+                key = config.get('api_key', '').strip()
+                model = config.get('model_name', '').strip()
+                provider = config.get('provider', 'Auto')
+                
+                if key:
+                    try:
+                        manager.test_connection(model, key, provider)
+                        self.config.api_status_cache[key] = True
+                    except:
+                        self.config.api_status_cache[key] = False
+        except Exception as e:
+            logging.error(f"Startup API check failed: {e}")
+
     def run(self):
         """Run the application."""
         print("=" * 50)
@@ -890,6 +1000,9 @@ class TranslatorApp:
 
         # Check for updates
         threading.Thread(target=self._check_updates_async, daemon=True).start()
+        
+        # Run one-time startup API check
+        threading.Thread(target=self._startup_api_check, daemon=True).start()
 
         # Start queue checker
         self.root.after(100, self._check_queue)

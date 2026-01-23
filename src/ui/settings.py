@@ -51,7 +51,6 @@ class SettingsWindow:
 
         # Make window modal and handle close properly
         self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
-        self.window.grab_set()
         self.window.focus_force()
 
         try:
@@ -197,6 +196,9 @@ class SettingsWindow:
             canvas.config(scrollregion=canvas.bbox("all"))
         self.window.after(100, update_scroll)
 
+        # Auto-test all APIs asynchronously after UI is ready
+        self.window.after(500, self._test_all_apis_async)
+
     def _add_api_row(self, parent, model, key, provider="Auto", is_primary=False):
         """Add a single API configuration row.
 
@@ -248,7 +250,7 @@ class SettingsWindow:
         key_var = tk.StringVar(value=key)
         ttk.Label(row, text="API Key:", font=('Segoe UI', 9)).pack(side=LEFT)
 
-        key_entry = ttk.Entry(row, textvariable=key_var, width=80, show="*")
+        key_entry = ttk.Entry(row, textvariable=key_var, width=70, show="*")
         key_entry.pack(side=LEFT, padx=(3, 5))
 
         # Store show state for this row
@@ -259,10 +261,12 @@ class SettingsWindow:
             if show_state['showing']:
                 key_entry.config(show="*")
                 show_btn.config(text="Show")
+                if HAS_TTKBOOTSTRAP: show_btn.configure(bootstyle="secondary-outline")
                 show_state['showing'] = False
             else:
                 key_entry.config(show="")
                 show_btn.config(text="Hide")
+                if HAS_TTKBOOTSTRAP: show_btn.configure(bootstyle="warning") # Warning color to encourage hiding
                 show_state['showing'] = True
 
         if HAS_TTKBOOTSTRAP:
@@ -305,7 +309,9 @@ class SettingsWindow:
             'model_placeholder': model_placeholder,
             'key_var': key_var,
             'key_entry': key_entry,
-            'is_primary': is_primary
+            'is_primary': is_primary,
+            'test_label': test_label, # Store reference for auto-testing
+            'model_placeholder': model_placeholder
         })
         # Only update button if it exists (button is created after initial rows)
         if hasattr(self, 'add_api_btn'):
@@ -375,6 +381,26 @@ class SettingsWindow:
             self.add_api_btn.configure(state='disabled')
         else:
             self.add_api_btn.configure(state='normal')
+
+    def _test_all_apis_async(self):
+        """Test all API configurations asynchronously."""
+        def run_tests():
+            # Iterate through a copy of rows to avoid modification issues
+            rows = list(self.api_rows)
+            for row in rows:
+                try:
+                    # Call test function on main thread to update UI safely
+                    self.window.after(0, lambda r=row: self._test_single_api(
+                        r['model_var'].get(),
+                        r['key_var'].get(),
+                        r['provider_var'].get(),
+                        r['test_label'],
+                        r['model_placeholder']
+                    ))
+                except Exception:
+                    pass
+        
+        threading.Thread(target=run_tests, daemon=True).start()
 
     def _test_single_api(self, model_name, api_key, provider, result_label, model_placeholder="gemini-2.0-flash"):
         """Test API connection."""

@@ -1,26 +1,15 @@
-cd c:\XinhTools\GeminiTranslator\gemini_translator_v4
-python test_groq.py <your_api_key_here>
-
-Tốt, tôi muốn nâng cấp dự án của mình lên.
-
-```
-1.History/Favorites: Lưu lại các bản dịch đã thực hiện, chỉ lưu 100 bản dịch gần nhất để chống tràn bộ nhớ
-2.OCR: Chụp màn hình → dịch text trong ảnh (dùng Tesseract hoặc AI vision) (tôi chưa rõ cách thức tốt nhất, hãy đề xuất). ví dụ sử dụng model AI nào tốt nhất,...
-3.Dictionary mode: nếu phần dịch chỉ có một đến vài từ rất ít, thì sửa promt sao cho thành Dịch từ đơn có thêm giải nghĩa, ví dụ, phát âm, mang tính từ điển cho user dễ hiểu
-4.Batch translate: Dịch nhiều file cùng lúc (txt, docx, srt subtitles) Tạo 1 nút cho phép nhập browse file, chỉ cần kéo file vào thả cũng được.
-```
-
+tôi muốn đã nâng cấp dự án của mình thành cấu trúc như thế này:
 
 New Structure
 
 gemini_translator_v4/
-├── main.py                  # Entry point (recommended)
-├── translator.py            # Backward compatible (just imports main)
-├── config.py                # Configuration (unchanged)
+├── main.py                  # Entry point 
+├── translator.py            # Backward compatible
+├── config.py                # Configuration
 │
 └── src/
     ├── constants.py         # VERSION, LANGUAGES, PROVIDERS_LIST, etc.
-    ├── app.py               # TranslatorApp class (~700 lines)
+    ├── app.py               # TranslatorApp class
     │
     ├── core/
     │   ├── clipboard.py     # ClipboardManager
@@ -29,7 +18,7 @@ gemini_translator_v4/
     │   └── hotkey.py        # HotkeyManager
     │
     ├── ui/
-    │   ├── settings.py      # SettingsWindow (~960 lines)
+    │   ├── settings.py      # SettingsWindow
     │   └── dialogs.py       # APIErrorDialog
     │
     └── utils/
@@ -38,8 +27,7 @@ gemini_translator_v4/
         └── updates.py       # check_for_updates(), download_and_install_update()
 How to Use
 Task	Command/File
-Run app (new way)	python main.py
-Run app (old way)	python translator.py (works same as before)
+Run app 	python main.py
 Build exe	PyInstaller will work the same
 When Editing Code
 Want to change...	Edit this file
@@ -52,3 +40,21 @@ Settings UI	src/ui/settings.py
 Error dialogs	src/ui/dialogs.py
 Main app (tray, tooltip, popup)	src/app.py
 Update checker	src/utils/updates.py
+
+Tôi có nâng cấp tiếp theo này muốn làm.
+
+```
+1.History/Favorites: Lưu lại các bản dịch đã thực hiện, chỉ lưu 100 bản dịch gần nhất để chống tràn bộ nhớ. Tạo 1 nút gọi các bản dịch gần nhất, scroll xuống dưới để xem phần phía dưới. nút này nằm trong window dịch chính.
+2.Dictionary mode: nếu phần dịch chỉ có một đến vài từ rất ít, thì sửa promt sao cho thành Dịch từ đơn có thêm giải nghĩa, ví dụ, phát âm, mang tính từ điển cho user dễ hiểu
+Tạo thêm 2 row Primary đặc biệt, 1 là xử lý hình ảnh, 1 là xử lý file. Phía dưới mỗi Primary mới này có nút add xử lý ảnh và file backup.
+3.Tạo 1 toggle cho phép bật chế độ nâng cao trong tab API. Toggle này chỉ có thể bật khi user nhập API có khả năng xử lý hình ảnh và test thành công. Sau khi bật, Bên trong window dịch chính sẽ hiện thêm phần add hình ảnh. 
+3.1. OCR: Chụp màn hình → dịch text trong ảnh (dùng Tesseract hoặc AI vision) (tôi chưa rõ cách thức tốt nhất, hãy đề xuất). ví dụ sử dụng model AI nào tốt nhất, hình như các model ai có các model dịch ảnh thì phải...
+4.Tạo 1 toggle cho phép bật chế độ nâng cao trong tab API. Toggle này chỉ có thể bật khi user nhập API có khả năng xử lý files. Sau khi bật, Bên trong window dịch chính sẽ hiện thêm phần add hình ảnh. 
+(Chỗ logic này check lại giúp tôi, một API xử lý hình ảnh có phải luôn đồng thời xử lý file luôn không? hay tôi đã làm đúng rồi?)
+4.1.Batch translate: Dịch nhiều file cùng lúc (txt, docx, srt subtitles) Tạo 1 nút cho phép nhập browse file ở trong cửa sổ dịch chính, chỉ cần kéo file vào thả cũng được.
+Khu vực chứa file và ảnh nằm cùng 1 chỗ và hiện thị bản mini giống như khi sử dụng chatGPT vậy.Hiện thị phía trên phần Original textbox.
+
+```
+
+Nâng cấp này có khả thi không? nếu có thì hãy giúp tôi tạo 1 Plan dưới dạng Promt cho AI hiểu mục đích, bối cảnh, mọi thứ để AI có thể hiểu rõ và làm theo. Promt này nói chi tiết mọi thứ cần làm không bỏ sót để không xảy ra lỗi. QUan trọng nhất là code phải mang tính chuyên nghiệp không để sai sót lỗi tính năng vặt. Bạn hãy suy nghĩ kỹ về phương hướng để nâng cấp 1 cách hợp lý và chuyên nghiệp nhất.
+
