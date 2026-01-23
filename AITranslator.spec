@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['run_with_restart.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
     datas=[],
