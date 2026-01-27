@@ -3,6 +3,7 @@ File Processor Module for AI Translator.
 Handles text extraction and translation for supported file formats.
 """
 import os
+import logging
 from typing import List, Dict, Optional, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,6 +29,13 @@ try:
 except ImportError:
     PyPDF2 = None
 
+# Import PDFOCRProcessor for scanned PDF support
+try:
+    from src.core.pdf_ocr import PDFOCRProcessor, HAS_PYMUPDF
+except ImportError:
+    PDFOCRProcessor = None
+    HAS_PYMUPDF = False
+
 
 class FileProcessor:
     """Handles text extraction and translation for files."""
@@ -36,6 +44,13 @@ class FileProcessor:
 
     def __init__(self, api_manager: 'AIAPIManager') -> None:
         self.api_manager = api_manager
+        self.logger = logging.getLogger(__name__)
+
+        # Initialize PDF OCR processor if available
+        if PDFOCRProcessor:
+            self.pdf_ocr = PDFOCRProcessor(api_manager)
+        else:
+            self.pdf_ocr = None
 
     def extract_text(self, file_path: str) -> str:
         """Extract text content from supported file formats."""
@@ -94,12 +109,24 @@ class FileProcessor:
     def _extract_pdf(self, file_path: str) -> str:
         """Extract text from .pdf file.
 
-        Uses PyPDF2 for text-based PDFs. For scanned PDFs,
-        Gemini's native vision capability can be used instead.
+        Uses PDFOCRProcessor which:
+        - Tries PyPDF2 text extraction first (fast, no API cost)
+        - Falls back to Gemini Vision OCR for scanned PDFs
         """
         if not PyPDF2:
             raise ImportError("PyPDF2 is not installed. Please install it to process .pdf files.")
 
+        # Use PDFOCRProcessor if available (handles both text-based and scanned PDFs)
+        if self.pdf_ocr:
+            try:
+                return self.pdf_ocr.extract_text(file_path)
+            except ImportError as e:
+                # PyMuPDF not installed, fall back to basic extraction
+                self.logger.warning(f"OCR not available: {e}. Using basic text extraction.")
+            except Exception as e:
+                self.logger.error(f"PDF OCR failed: {e}. Using basic text extraction.")
+
+        # Fallback to basic PyPDF2 extraction
         text_parts = []
         try:
             with open(file_path, 'rb') as f:
@@ -112,7 +139,7 @@ class FileProcessor:
             raise ValueError(f"Failed to extract text from PDF: {e}")
 
         if not text_parts:
-            return "[PDF contains no extractable text - may be scanned/image-based]"
+            return "[PDF contains no extractable text - may be scanned/image-based. Install PyMuPDF for OCR support: pip install PyMuPDF]"
 
         return '\n\n'.join(text_parts)
 

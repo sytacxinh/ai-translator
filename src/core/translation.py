@@ -13,6 +13,7 @@ from src.constants import COOLDOWN
 from src.core.clipboard import ClipboardManager
 from src.core.api_manager import AIAPIManager
 from src.core.history import HistoryManager
+from src.core.provider_health import ProviderHealthManager
 from config import Config
 
 
@@ -27,12 +28,13 @@ class TranslationService:
         self.translation_queue: queue.Queue[Tuple[str, str, str]] = queue.Queue()
         self.notification_callback: Optional[Callable[[str], None]] = notification_callback
         self.history_manager: HistoryManager = HistoryManager(config)
+        self.health_manager: ProviderHealthManager = ProviderHealthManager(config)
         self._configure_api()
 
     def _configure_api(self) -> bool:
-        """Configure the AI API with all keys."""
+        """Configure the AI API with all keys and health manager."""
         api_keys = self.config.get_api_keys()
-        self.api_manager.configure(api_keys, self.notification_callback)
+        self.api_manager.configure(api_keys, self.notification_callback, self.health_manager)
 
         # Check if there's at least one valid (non-empty) API key
         has_valid_key = False

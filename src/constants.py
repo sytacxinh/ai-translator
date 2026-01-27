@@ -3,7 +3,7 @@ Constants and configuration values for AI Translator.
 """
 
 # ============== VERSION ==============
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 APP_NAME = "AI Translator"
 GITHUB_REPO = "sytacxinh/ai-translator"
 

@@ -48,6 +48,7 @@ from src.core.hotkey import HotkeyManager
 from src.ui.settings import SettingsWindow
 from src.ui.dialogs import APIErrorDialog
 from src.ui.history_dialog import HistoryDialog
+from src.ui.toast import ToastManager, ToastType
 from src.utils.updates import check_for_updates
 from src.core.screenshot import ScreenshotCapture
 from src.core.file_processor import FileProcessor
@@ -110,6 +111,9 @@ class TranslatorApp:
 
         # Thread-safe queue for windnd file drops (avoids GIL issues)
         self._drop_queue = queue.Queue()
+
+        # Toast notification manager
+        self.toast = ToastManager(self.root)
 
     def _on_hotkey_translate(self, language: str):
         """Handle hotkey translation request."""
@@ -427,6 +431,7 @@ class TranslatorApp:
         """Copy translation from tooltip to clipboard."""
         pyperclip.copy(self.current_translated)
         self.tooltip_copy_btn.configure(text="Copied!")
+        self.toast.show_success("Copied to clipboard!")
         if self.tooltip:
             self.tooltip.after(1000, lambda: self._reset_copy_btn())
 
@@ -450,6 +455,23 @@ class TranslatorApp:
             self.root.after(0, lambda: self.show_main_window(icon, item))
             return
 
+        # If popup already exists, bring it to front instead of creating new one
+        if self.popup:
+            try:
+                if self.popup.winfo_exists():
+                    # Restore from minimized/iconified state
+                    self.popup.deiconify()
+                    # Force window to top using topmost trick
+                    self.popup.attributes('-topmost', True)
+                    self.popup.update()
+                    self.popup.attributes('-topmost', False)
+                    # Additional methods to ensure focus
+                    self.popup.lift()
+                    self.popup.focus_force()
+                    return
+            except tk.TclError:
+                pass  # Window was destroyed, create new one
+
         # Prevent double-calling by checking if popup is being shown
         if hasattr(self, '_showing_popup') and self._showing_popup:
             return
@@ -460,8 +482,46 @@ class TranslatorApp:
             # Reset after a short delay
             self.root.after(500, lambda: setattr(self, '_showing_popup', False))
 
-    def show_popup(self, original: str, translated: str, target_lang: str):
-        """Show the full translator popup window."""
+    def show_popup(self, original: str, translated: str, target_lang: str, force_new: bool = False):
+        """Show the full translator popup window.
+
+        Args:
+            original: Original text to display
+            translated: Translated text to display
+            target_lang: Target language
+            force_new: If False and popup exists with content, just bring to front
+        """
+        # If popup exists with content and we're not forcing new, just bring it to front
+        if not force_new and self.popup:
+            try:
+                if self.popup.winfo_exists():
+                    # Check if there's existing content we shouldn't destroy
+                    has_content = False
+                    if hasattr(self, 'original_text') and self.original_text:
+                        try:
+                            existing_text = self.original_text.get('1.0', 'end-1c').strip()
+                            has_content = bool(existing_text)
+                        except:
+                            pass
+                    if hasattr(self, 'attachment_area') and self.attachment_area:
+                        try:
+                            has_content = has_content or len(self.attachment_area.get_attachments()) > 0
+                        except:
+                            pass
+
+                    # If popup has content and we're just opening (empty params), bring to front
+                    if has_content and not original and not translated:
+                        self.popup.deiconify()
+                        self.popup.attributes('-topmost', True)
+                        self.popup.update()
+                        self.popup.attributes('-topmost', False)
+                        self.popup.lift()
+                        self.popup.focus_force()
+                        return
+            except tk.TclError:
+                pass
+
+        # Destroy existing popup if present
         if self.popup:
             try:
                 self.popup.destroy()
@@ -565,7 +625,7 @@ class TranslatorApp:
         # History button
         if HAS_TTKBOOTSTRAP:
             ttk.Button(btn_frame, text="History", command=self._open_history,
-                       bootstyle="secondary-outline", width=10).pack(side=LEFT, padx=10)
+                       bootstyle="light-outline", width=10).pack(side=LEFT, padx=10)
         else:
             ttk.Button(btn_frame, text="History", command=self._open_history,
                        width=10).pack(side=LEFT, padx=10)
@@ -974,19 +1034,25 @@ Process ALL files. Extract actual text from images (OCR), do not describe them."
     def _copy_translation(self):
         """Copy translation to clipboard."""
         translated = self.trans_text.get('1.0', tk.END).strip()
+        if not translated:
+            self.toast.show_warning("No translation to copy")
+            return
         pyperclip.copy(translated)
         self.copy_btn.configure(text="Copied!")
+        self.toast.show_success("Copied to clipboard!")
         self.popup.after(1000, lambda: self.copy_btn.configure(text="Copy"))
 
     def _open_in_gemini(self):
         """Open Gemini web with translation prompt."""
         original = self.original_text.get('1.0', tk.END).strip()
         if not original:
+            self.toast.show_warning("No text to translate")
             return
 
         prompt = f"Translate the following text to {self.selected_language}:\n\n{original}"
         pyperclip.copy(prompt)
         self.gemini_btn.configure(text="Copied! Opening...")
+        self.toast.show_info("Prompt copied! Opening Gemini...")
         webbrowser.open("https://gemini.google.com/app")
         self.popup.after(2000, lambda: self.gemini_btn.configure(text="✦ Open Gemini"))
 
@@ -1034,8 +1100,26 @@ Process ALL files. Extract actual text from images (OCR), do not describe them."
                 self.popup.deiconify()
             return
 
-        # Show popup with empty content - screenshot will be added to attachments
-        self.show_popup("", "", self.selected_language)
+        # Check if popup already exists with attachment_area
+        popup_exists = (self.popup and
+                        hasattr(self, 'attachment_area') and
+                        self.attachment_area)
+
+        if popup_exists:
+            # Popup exists - just restore it and add screenshot (don't recreate)
+            try:
+                self.popup.deiconify()
+                self.popup.attributes('-topmost', True)
+                self.popup.update()
+                self.popup.attributes('-topmost', False)
+                self.popup.lift()
+                self.popup.focus_force()
+            except tk.TclError:
+                popup_exists = False  # Window was destroyed, need to create new
+
+        if not popup_exists:
+            # Create new popup
+            self.show_popup("", "", self.selected_language, force_new=True)
 
         # Add screenshot to attachments
         if hasattr(self, 'attachment_area') and self.attachment_area:
@@ -1408,6 +1492,13 @@ Response format:
 
         # Check if already open
         if self.settings_window and self.settings_window.window.winfo_exists():
+            # Restore from minimized state
+            self.settings_window.window.deiconify()
+            # Force window to top using topmost trick
+            self.settings_window.window.attributes('-topmost', True)
+            self.settings_window.window.update()
+            self.settings_window.window.attributes('-topmost', False)
+            # Additional methods to ensure focus
             self.settings_window.window.lift()
             self.settings_window.window.focus_force()
             return

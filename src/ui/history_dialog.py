@@ -20,13 +20,15 @@ class HistoryDialog:
     def __init__(self, parent, history_manager, on_load_callback):
         self.history_manager = history_manager
         self.on_load_callback = on_load_callback
+        self.search_var = None
+        self.all_history = []  # Cache for filtering
 
         # Use tk.Toplevel
         self.window = tk.Toplevel(parent)
         self.window.title("Translation History")
         self.window.geometry("600x700")
         self.window.configure(bg='#2b2b2b')
-        
+
         # Center
         self.window.update_idletasks()
         x = (self.window.winfo_screenwidth() - 600) // 2
@@ -45,15 +47,41 @@ class HistoryDialog:
         # Header
         header_frame = ttk.Frame(self.window, padding=15)
         header_frame.pack(fill=X)
-        
+
         ttk.Label(header_frame, text="Recent Translations", font=('Segoe UI', 14, 'bold')).pack(side=LEFT)
-        
+
         if HAS_TTKBOOTSTRAP:
             ttk.Button(header_frame, text="Clear All", command=self._clear_all,
                        bootstyle="danger-outline", width=10).pack(side=RIGHT)
         else:
             ttk.Button(header_frame, text="Clear All", command=self._clear_all,
                        width=10).pack(side=RIGHT)
+
+        # Search Frame
+        search_frame = ttk.Frame(self.window, padding=(15, 0, 15, 10))
+        search_frame.pack(fill=X)
+
+        ttk.Label(search_frame, text="🔍", font=('Segoe UI', 11)).pack(side=LEFT, padx=(0, 5))
+
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var,
+                                      font=('Segoe UI', 10))
+        self.search_entry.pack(side=LEFT, fill=X, expand=True)
+        self.search_entry.insert(0, "Search history...")
+        self.search_entry.bind('<FocusIn>', self._on_search_focus_in)
+        self.search_entry.bind('<FocusOut>', self._on_search_focus_out)
+        self.search_var.trace_add('write', self._on_search_change)
+
+        # Clear search button
+        if HAS_TTKBOOTSTRAP:
+            self.clear_search_btn = ttk.Button(search_frame, text="✕", width=3,
+                                               command=self._clear_search,
+                                               bootstyle="secondary-outline")
+        else:
+            self.clear_search_btn = ttk.Button(search_frame, text="✕", width=3,
+                                               command=self._clear_search)
+        self.clear_search_btn.pack(side=LEFT, padx=(5, 0))
+        self.clear_search_btn.pack_forget()  # Initially hidden
 
         # List Container (Canvas + Scrollbar)
         list_container = ttk.Frame(self.window)
@@ -77,7 +105,7 @@ class HistoryDialog:
         # Mousewheel scrolling
         def _on_mousewheel(event):
             self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
+
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
         self.window.bind("<Destroy>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
 
@@ -86,49 +114,105 @@ class HistoryDialog:
             self.canvas.itemconfig(self.canvas.find_withtag("all")[0], width=event.width)
         self.canvas.bind('<Configure>', _configure_canvas)
 
+    def _on_search_focus_in(self, event):
+        """Clear placeholder on focus."""
+        if self.search_entry.get() == "Search history...":
+            self.search_entry.delete(0, tk.END)
+            self.search_entry.configure(foreground='#ffffff')
+
+    def _on_search_focus_out(self, event):
+        """Restore placeholder if empty."""
+        if not self.search_entry.get():
+            self.search_entry.insert(0, "Search history...")
+            self.search_entry.configure(foreground='#888888')
+
+    def _on_search_change(self, *args):
+        """Handle search text change."""
+        search_text = self.search_var.get()
+
+        # Show/hide clear button
+        if search_text and search_text != "Search history...":
+            self.clear_search_btn.pack(side=LEFT, padx=(5, 0))
+        else:
+            self.clear_search_btn.pack_forget()
+
+        # Filter and refresh
+        self._filter_and_display()
+
+    def _clear_search(self):
+        """Clear search and show all history."""
+        self.search_entry.delete(0, tk.END)
+        self.search_entry.insert(0, "Search history...")
+        self.search_entry.configure(foreground='#888888')
+        self.clear_search_btn.pack_forget()
+        self._filter_and_display()
+
     def _refresh_list(self):
-        """Populate the list with history items."""
+        """Load history and display."""
+        self.all_history = self.history_manager.get_history()
+        self._filter_and_display()
+
+    def _filter_and_display(self):
+        """Filter history based on search and display."""
         # Clear existing
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
 
-        history = self.history_manager.get_history()
+        search_text = self.search_var.get() if self.search_var else ""
+        if search_text == "Search history...":
+            search_text = ""
+        search_text = search_text.lower().strip()
 
-        if not history:
-            ttk.Label(self.scrollable_frame, text="No history yet.", 
+        # Filter history
+        if search_text:
+            filtered = [
+                item for item in self.all_history
+                if (search_text in item.get('original', '').lower() or
+                    search_text in item.get('translated', '').lower() or
+                    search_text in item.get('target_lang', '').lower())
+            ]
+        else:
+            filtered = self.all_history
+
+        if not filtered:
+            if search_text:
+                msg = f"No results for \"{search_text}\""
+            else:
+                msg = "No history yet."
+            ttk.Label(self.scrollable_frame, text=msg,
                      foreground='#888888', font=('Segoe UI', 10)).pack(pady=20)
             return
 
-        for item in history:
+        for item in filtered:
             self._create_history_item(item)
 
     def _create_history_item(self, item):
         """Create a single history row."""
         frame = ttk.Frame(self.scrollable_frame, padding=10)
         frame.pack(fill=X, pady=2)
-        
+
         # Separator line at bottom
         ttk.Separator(self.scrollable_frame).pack(fill=X, padx=10)
 
         # Top row: Lang + Time
         top_row = ttk.Frame(frame)
         top_row.pack(fill=X, pady=(0, 5))
-        
+
         lang = item.get('target_lang', 'Unknown')
         ts = item.get('timestamp', 0)
         time_str = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
-        
+
         if HAS_TTKBOOTSTRAP:
             ttk.Label(top_row, text=lang, bootstyle="info", font=('Segoe UI', 9, 'bold')).pack(side=LEFT)
         else:
             ttk.Label(top_row, text=lang, foreground='#17a2b8', font=('Segoe UI', 9, 'bold')).pack(side=LEFT)
-            
+
         ttk.Label(top_row, text=time_str, foreground='#888888', font=('Segoe UI', 8)).pack(side=RIGHT)
 
         # Content
         original = item.get('original', '').replace('\n', ' ')
         if len(original) > 60: original = original[:57] + "..."
-        
+
         translated = item.get('translated', '').replace('\n', ' ')
         if len(translated) > 60: translated = translated[:57] + "..."
 
@@ -153,7 +237,8 @@ class HistoryDialog:
     def _delete_item(self, item):
         """Delete item."""
         self.history_manager.delete_entry(item.get('id'))
-        self._refresh_list()
+        self.all_history = [h for h in self.all_history if h.get('id') != item.get('id')]
+        self._filter_and_display()
 
     def _clear_all(self):
         """Clear all history."""
@@ -162,6 +247,7 @@ class HistoryDialog:
         else:
             from tkinter import messagebox
             if not messagebox.askyesno("Confirm", "Clear all history?", parent=self.window): return
-            
+
         self.history_manager.clear_history()
-        self._refresh_list()
+        self.all_history = []
+        self._filter_and_display()

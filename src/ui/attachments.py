@@ -41,7 +41,7 @@ class AttachmentArea(ttk.Frame):
 
         ttk.Label(self.top_frame, text="Attachments:", font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT)
 
-        self.clear_btn = ttk.Button(self.top_frame, text="Clear All", command=self.clear, width=10)
+        self.clear_btn = ttk.Button(self.top_frame, text="Clear Attachments", command=self.clear, width=15)
         # Pack clear_btn later when items exist
 
         # Container for items

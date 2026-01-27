@@ -1,6 +1,6 @@
 # AI Translator
 
-![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational.svg)
@@ -83,7 +83,7 @@ A powerful Windows desktop application for instant text translation using AI. Se
 
 ### Option 1: Download EXE (Recommended)
 1. Go to [Releases](https://github.com/sytacxinh/ai-translator/releases)
-2. Download `AITranslator_v1.6.0.exe`
+2. Download `AITranslator_v1.7.0.exe`
 3. Run the application
 4. Enter your API key in Settings
 
@@ -199,14 +199,18 @@ ai-translator/
 │   │   ├── screenshot.py   # Screen capture for OCR
 │   │   ├── multimodal.py   # Vision processing
 │   │   ├── file_processor.py # Document text extraction
+│   │   ├── pdf_ocr.py      # Scanned PDF OCR (NEW)
 │   │   ├── history.py      # Translation history
 │   │   ├── crypto.py       # Secure API key storage (DPAPI)
-│   │   └── ssl_pinning.py  # SSL certificate pinning
+│   │   ├── ssl_pinning.py  # SSL certificate pinning
+│   │   ├── auth.py         # Windows Hello authentication (NEW)
+│   │   └── provider_health.py # Smart provider fallback (NEW)
 │   ├── ui/
 │   │   ├── settings.py     # Settings window
 │   │   ├── attachments.py  # File attachment widget
-│   │   ├── history_dialog.py # History viewer
+│   │   ├── history_dialog.py # History viewer with search
 │   │   ├── progress_dialog.py # Progress indicator
+│   │   ├── toast.py        # Toast notifications (NEW)
 │   │   └── dialogs.py      # Error dialogs
 │   └── utils/
 │       ├── logging_setup.py    # Logging
@@ -271,6 +275,8 @@ ai-translator/
 | chardet | Encoding detection |
 | windnd | Drag & drop support |
 | PyPDF2 | PDF text extraction |
+| PyMuPDF | Scanned PDF OCR |
+| winsdk | Windows Hello authentication |
 
 ### Configuration Storage
 - **Location**: `%APPDATA%/AITranslator/config.json`
@@ -279,21 +285,30 @@ ai-translator/
 
 ---
 
-## What's New in v1.6.0
+## What's New in v1.7.0
 
 ### Security Enhancements
-- **Encrypted API Keys** - API keys now encrypted using Windows DPAPI
-- **SSL Certificate Pinning** - TLS 1.2+ enforced for all API calls
+- **Windows Hello Authentication** - Protect API keys with PIN, Fingerprint, or Face recognition
+- **Show All API Keys** - One-click to reveal/hide all keys (with authentication)
+- **Password Fallback** - Falls back to Windows password if Windows Hello unavailable
+- **Soft Rate Limiting** - 5 attempts per authentication dialog
 
 ### New Features
-- **PDF Support** - Extract and translate text from PDF files
-- **Improved OCR** - Better text extraction from images with few-shot prompting
-- **Progress Indicator** - Visual feedback for large file processing
+- **Smart Provider Fallback** - Auto-switch to backup API when primary fails
+- **Scanned PDF OCR** - Extract text from image-based PDFs using AI vision
+- **Toast Notifications** - Non-intrusive notifications with auto-dismiss
+- **Search History** - Filter translation history by keyword
 
-### Developer Improvements
-- **Type Hints** - Full type annotations for better IDE support
-- **Unit Tests** - pytest suite with 60%+ coverage
-- **Modular Security** - Separate crypto.py and ssl_pinning.py modules
+### UI Improvements
+- **Synced Show/Hide Buttons** - Individual and "Show All" buttons stay in sync
+- **Better Settings UI** - Improved API key management experience
+
+### Previous in v1.6.0
+- Encrypted API Keys (Windows DPAPI)
+- SSL Certificate Pinning (TLS 1.2+)
+- PDF Support
+- Progress Indicator
+- Type hints & Unit tests
 
 ### Previous in v1.5.0
 - Modular architecture refactoring
@@ -319,7 +334,7 @@ python main.py
 ```bash
 pip install pyinstaller
 pyinstaller AITranslator.spec
-# Output: dist/AITranslator_v1.6.0.exe
+# Output: dist/AITranslator_v1.7.0.exe
 ```
 
 ### Running Tests

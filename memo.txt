@@ -1,60 +1,113 @@
-tôi muốn đã nâng cấp dự án của mình thành cấu trúc như thế này:
-
-New Structure
+AI Translator v1.7.0 - Project Structure
+========================================
 
 gemini_translator_v4/
-├── main.py                  # Entry point 
+├── main.py                  # Entry point
 ├── translator.py            # Backward compatible
-├── config.py                # Configuration
+├── config.py                # Configuration management
+├── requirements.txt         # Dependencies
 │
 └── src/
     ├── constants.py         # VERSION, LANGUAGES, PROVIDERS_LIST, etc.
-    ├── app.py               # TranslatorApp class
+    ├── app.py               # TranslatorApp class (main application)
     │
     ├── core/
     │   ├── clipboard.py     # ClipboardManager
-    │   ├── api_manager.py   # AIAPIManager
+    │   ├── api_manager.py   # AIAPIManager (14 providers)
     │   ├── translation.py   # TranslationService
-    │   └── hotkey.py        # HotkeyManager
+    │   ├── hotkey.py        # HotkeyManager (global hotkeys)
+    │   ├── history.py       # Translation history (100 entries)
+    │   ├── multimodal.py    # Vision processing (OCR)
+    │   ├── screenshot.py    # Screen capture for OCR
+    │   ├── file_processor.py # Document text extraction
+    │   ├── pdf_ocr.py       # [NEW] Scanned PDF OCR support
+    │   ├── crypto.py        # Secure API key storage (DPAPI)
+    │   ├── ssl_pinning.py   # SSL certificate pinning
+    │   ├── auth.py          # [NEW] Windows Hello authentication
+    │   └── provider_health.py # [NEW] Smart provider fallback
     │
     ├── ui/
-    │   ├── settings.py      # SettingsWindow
-    │   └── dialogs.py       # APIErrorDialog
+    │   ├── settings.py      # SettingsWindow (with Show All API Keys)
+    │   ├── dialogs.py       # APIErrorDialog
+    │   ├── attachments.py   # File attachment widget
+    │   ├── history_dialog.py # History viewer (with search)
+    │   ├── progress_dialog.py # Progress indicator
+    │   └── toast.py         # [NEW] Toast notifications
     │
     └── utils/
         ├── logging_setup.py # setup_logging()
         ├── single_instance.py # is_already_running()
         └── updates.py       # check_for_updates(), download_and_install_update()
+
+========================================
 How to Use
-Task	Command/File
-Run app 	python main.py
-Build exe	PyInstaller will work the same
+========================================
+
+Task                    Command/File
+----                    ------------
+Run app                 python main.py
+Build exe               pyinstaller AITranslator.spec
+Run tests               pytest tests/ --cov=src
+
+========================================
 When Editing Code
-Want to change...	Edit this file
-Constants (VERSION, LANGUAGES)	src/constants.py
-Clipboard logic	src/core/clipboard.py
-API providers	src/core/api_manager.py
-Translation prompts	src/core/translation.py
-Hotkey registration	src/core/hotkey.py
-Settings UI	src/ui/settings.py
-Error dialogs	src/ui/dialogs.py
-Main app (tray, tooltip, popup)	src/app.py
-Update checker	src/utils/updates.py
+========================================
 
-Tôi có nâng cấp tiếp theo này muốn làm.
+Want to change...              Edit this file
+-----------------              --------------
+Constants (VERSION, LANGUAGES) src/constants.py
+Clipboard logic                src/core/clipboard.py
+API providers                  src/core/api_manager.py
+Translation prompts            src/core/translation.py
+Hotkey registration            src/core/hotkey.py
+History management             src/core/history.py
+Vision/OCR processing          src/core/multimodal.py
+Screenshot capture             src/core/screenshot.py
+File text extraction           src/core/file_processor.py
+Scanned PDF OCR                src/core/pdf_ocr.py
+API key encryption             src/core/crypto.py
+SSL pinning                    src/core/ssl_pinning.py
+Windows Hello auth             src/core/auth.py
+Provider fallback logic        src/core/provider_health.py
+Settings UI                    src/ui/settings.py
+Error dialogs                  src/ui/dialogs.py
+File attachments widget        src/ui/attachments.py
+History dialog (with search)   src/ui/history_dialog.py
+Progress indicator             src/ui/progress_dialog.py
+Toast notifications            src/ui/toast.py
+Main app (tray, tooltip, popup) src/app.py
+Update checker                 src/utils/updates.py
 
-```
-1.History/Favorites: Lưu lại các bản dịch đã thực hiện, chỉ lưu 100 bản dịch gần nhất để chống tràn bộ nhớ. Tạo 1 nút gọi các bản dịch gần nhất, scroll xuống dưới để xem phần phía dưới. nút này nằm trong window dịch chính.
-2.Dictionary mode: nếu phần dịch chỉ có một đến vài từ rất ít, thì sửa promt sao cho thành Dịch từ đơn có thêm giải nghĩa, ví dụ, phát âm, mang tính từ điển cho user dễ hiểu
-Tạo thêm 2 row Primary đặc biệt, 1 là xử lý hình ảnh, 1 là xử lý file. Phía dưới mỗi Primary mới này có nút add xử lý ảnh và file backup.
-3.Tạo 1 toggle cho phép bật chế độ nâng cao trong tab API. Toggle này chỉ có thể bật khi user nhập API có khả năng xử lý hình ảnh và test thành công. Sau khi bật, Bên trong window dịch chính sẽ hiện thêm phần add hình ảnh. 
-3.1. OCR: Chụp màn hình → dịch text trong ảnh (dùng Tesseract hoặc AI vision) (tôi chưa rõ cách thức tốt nhất, hãy đề xuất). ví dụ sử dụng model AI nào tốt nhất, hình như các model ai có các model dịch ảnh thì phải...
-4.Tạo 1 toggle cho phép bật chế độ nâng cao trong tab API. Toggle này chỉ có thể bật khi user nhập API có khả năng xử lý files. Sau khi bật, Bên trong window dịch chính sẽ hiện thêm phần add hình ảnh. 
-(Chỗ logic này check lại giúp tôi, một API xử lý hình ảnh có phải luôn đồng thời xử lý file luôn không? hay tôi đã làm đúng rồi?)
-4.1.Batch translate: Dịch nhiều file cùng lúc (txt, docx, srt subtitles) Tạo 1 nút cho phép nhập browse file ở trong cửa sổ dịch chính, chỉ cần kéo file vào thả cũng được.
-Khu vực chứa file và ảnh nằm cùng 1 chỗ và hiện thị bản mini giống như khi sử dụng chatGPT vậy.Hiện thị phía trên phần Original textbox.
+========================================
+New Features in v1.7.0
+========================================
 
-```
+1. Windows Hello Authentication
+   - PIN, Fingerprint, Face recognition
+   - Protects "Show All API Keys" and "Delete All API Keys" buttons
+   - Falls back to Windows password if Windows Hello unavailable
+   - Soft rate limit: 5 attempts per dialog
 
-Nâng cấp này có khả thi không? nếu có thì hãy giúp tôi tạo 1 Plan dưới dạng Promt cho AI hiểu mục đích, bối cảnh, mọi thứ để AI có thể hiểu rõ và làm theo. Promt này nói chi tiết mọi thứ cần làm không bỏ sót để không xảy ra lỗi. QUan trọng nhất là code phải mang tính chuyên nghiệp không để sai sót lỗi tính năng vặt. Bạn hãy suy nghĩ kỹ về phương hướng để nâng cấp 1 cách hợp lý và chuyên nghiệp nhất.
+2. Show All API Keys Button
+   - One-click to show/hide all API keys
+   - Syncs with individual Show/Hide buttons
+   - Requires authentication only when showing
 
+3. Smart Provider Fallback
+   - Auto-switch to backup API when primary fails
+   - Provider health tracking
+   - Configurable retry logic
+
+4. Toast Notifications
+   - Non-intrusive notifications
+   - Auto-dismiss with timer
+   - Click to dismiss
+
+5. Scanned PDF OCR
+   - Extract text from scanned/image-based PDFs
+   - Uses AI vision for text recognition
+   - Falls back to standard PDF text extraction
+
+6. Search History
+   - Filter translation history by keyword
+   - Search in both original and translated text

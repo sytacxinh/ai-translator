@@ -13,6 +13,10 @@ chardet>=5.0.0
 tkinterdnd2>=0.3.0
 windnd>=1.0.7
 PyPDF2>=3.0.0
+PyMuPDF>=1.23.0  # For scanned PDF OCR support
+
+# Windows Hello authentication
+winsdk>=1.0.0b10  # Windows Runtime API for Windows Hello
 
 # Testing dependencies
 pytest>=7.0.0

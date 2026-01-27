@@ -7,7 +7,7 @@ import time
 import urllib.request
 import urllib.error
 import logging
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, TYPE_CHECKING
 
 import google.generativeai as genai
 
@@ -15,13 +15,22 @@ from src.constants import MODEL_PROVIDER_MAP, API_KEY_PATTERNS
 from src.core.multimodal import MultimodalProcessor
 from src.core.ssl_pinning import get_ssl_context_for_url
 
+if TYPE_CHECKING:
+    from src.core.provider_health import ProviderHealthManager
+
 
 class AIAPIManager:
     """
-    Manages AI API with primary/backup key fallback.
+    Manages AI API with primary/backup key fallback and smart provider selection.
     Uses AI model for fast translations.
     Supports: Google Gemini, OpenAI, Anthropic, Groq, xAI, DeepSeek, Mistral, Perplexity,
               Cerebras, SambaNova, Together, SiliconFlow, OpenRouter.
+
+    Features:
+    - Multi-provider support with auto-detection
+    - Smart fallback with health tracking
+    - Adaptive timeouts based on provider performance
+    - Circuit breaker for failing providers
     """
 
     MODEL_NAME: str = ''
@@ -29,12 +38,15 @@ class AIAPIManager:
     def __init__(self) -> None:
         self.api_configs: List[Dict[str, Any]] = []
         self.notification_callback: Optional[Callable[[str], None]] = None
+        self.health_manager: Optional['ProviderHealthManager'] = None
 
     def configure(self, api_configs: List[Dict[str, Any]],
-                  notification_callback: Optional[Callable[[str], None]] = None) -> None:
+                  notification_callback: Optional[Callable[[str], None]] = None,
+                  health_manager: Optional['ProviderHealthManager'] = None) -> None:
         """Configure the API with list of {model_name, api_key, provider}."""
         self.api_configs = api_configs
         self.notification_callback = notification_callback
+        self.health_manager = health_manager
 
     def _identify_provider(self, model_name: str, api_key: str = "") -> str:  # noqa: C901
         """
@@ -346,17 +358,19 @@ class AIAPIManager:
             raise e
 
     def translate(self, prompt: str) -> str:
-        """Translate text using configured keys with failover."""
+        """Translate text using configured keys with smart fallback."""
         if not self.api_configs:
             raise Exception("API not configured. Please set your API key in Settings.")
 
         errors = []
         has_valid_key = False
 
+        # Prepare configs with provider info for sorting
+        configs_with_providers = []
         for i, config in enumerate(self.api_configs):
             api_key = config.get('api_key', '').strip()
             model_name = config.get('model_name', '').strip()
-            provider = config.get('provider', 'Auto')
+            provider_setting = config.get('provider', 'Auto')
 
             if not api_key:
                 continue
@@ -367,13 +381,62 @@ class AIAPIManager:
                 logging.warning(f"[API] {error_msg}")
                 continue
 
-            has_valid_key = True
+            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting.lower()
+            configs_with_providers.append({
+                'config': config,
+                'provider': target_provider,
+                'api_key': api_key,
+                'model_name': model_name,
+                'index': i
+            })
 
+        if not configs_with_providers:
+            if errors:
+                raise Exception("No valid API configuration.\n" + "\n".join(errors))
+            raise Exception("No valid API key configured. Please add an API key in Settings.")
+
+        # Sort by provider health if health manager is available
+        if self.health_manager:
+            # Get unique providers and their priority
+            providers = list(set(c['provider'] for c in configs_with_providers))
+            sorted_providers = self.health_manager.get_priority_sorted_providers(providers)
+
+            # Sort configs by provider priority
+            provider_priority = {p: i for i, p in enumerate(sorted_providers)}
+            configs_with_providers.sort(key=lambda c: provider_priority.get(c['provider'], 999))
+
+            logging.debug(f"[API] Provider order after sorting: {[c['provider'] for c in configs_with_providers]}")
+
+        # Try each config in order
+        for item in configs_with_providers:
+            has_valid_key = True
+            config = item['config']
+            target_provider = item['provider']
+            api_key = item['api_key']
+            model_name = item['model_name']
+
+            # Get adaptive timeout if health manager available
+            timeout = None
+            if self.health_manager:
+                timeout = self.health_manager.get_adaptive_timeout(target_provider)
+
+            start_time = time.time()
             try:
-                target_provider = self._identify_provider(model_name, api_key) if provider == 'Auto' else provider.lower()
-                return self._generate_content(target_provider, api_key, model_name, prompt)
+                result = self._generate_content(target_provider, api_key, model_name, prompt)
+
+                # Record success
+                if self.health_manager:
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    self.health_manager.record_success(target_provider, response_time_ms)
+
+                return result
+
             except Exception as e:
-                logging.warning(f"[API] Failed with {model_name} (Key #{i+1}): {e}")
+                # Record failure
+                if self.health_manager:
+                    self.health_manager.record_failure(target_provider)
+
+                logging.warning(f"[API] Failed with {model_name} ({target_provider}): {e}")
                 errors.append(f"{model_name}: {str(e)}")
                 continue
 
@@ -383,37 +446,71 @@ class AIAPIManager:
         raise Exception("All API keys failed.\n" + "\n".join(errors))
 
     def translate_image(self, prompt: str, image_path: str) -> str:
-        """Translate/Analyze image using configured keys."""
+        """Translate/Analyze image using configured keys with smart fallback."""
         if not self.api_configs:
             raise Exception("API not configured. Please set your API key in Settings.")
 
         errors = []
         has_valid_key = False
 
+        # Prepare vision-capable configs
+        vision_configs = []
         for i, config in enumerate(self.api_configs):
             api_key = config.get('api_key', '').strip()
             model_name = config.get('model_name', '').strip()
-            provider = config.get('provider', 'Auto')
+            provider_setting = config.get('provider', 'Auto')
 
             if not api_key or not model_name:
                 continue
 
-            target_provider = self._identify_provider(model_name, api_key) if provider == 'Auto' else provider.lower()
+            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting.lower()
 
             # Check vision capability
             if not MultimodalProcessor.is_vision_capable(model_name, target_provider):
                 continue
 
-            has_valid_key = True
+            vision_configs.append({
+                'config': config,
+                'provider': target_provider,
+                'api_key': api_key,
+                'model_name': model_name
+            })
 
+        if not vision_configs:
+            raise Exception("No configured API supports vision. Please use a vision-capable model (e.g., Gemini 2.0 Flash, GPT-4o).")
+
+        # Sort by provider health if health manager is available
+        if self.health_manager:
+            providers = list(set(c['provider'] for c in vision_configs))
+            sorted_providers = self.health_manager.get_priority_sorted_providers(providers)
+            provider_priority = {p: i for i, p in enumerate(sorted_providers)}
+            vision_configs.sort(key=lambda c: provider_priority.get(c['provider'], 999))
+
+        # Try each config
+        for item in vision_configs:
+            has_valid_key = True
+            target_provider = item['provider']
+            api_key = item['api_key']
+            model_name = item['model_name']
+
+            start_time = time.time()
             try:
-                return self._generate_content(target_provider, api_key, model_name, prompt, image_path)
+                result = self._generate_content(target_provider, api_key, model_name, prompt, image_path)
+
+                # Record success
+                if self.health_manager:
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    self.health_manager.record_success(target_provider, response_time_ms)
+
+                return result
+
             except Exception as e:
+                # Record failure
+                if self.health_manager:
+                    self.health_manager.record_failure(target_provider)
+
                 errors.append(f"{model_name}: {str(e)}")
                 continue
-
-        if not has_valid_key:
-            raise Exception("No configured API supports vision. Please use a vision-capable model (e.g., Gemini 2.0 Flash, GPT-4o).")
 
         raise Exception("All vision APIs failed.\n" + "\n".join(errors))
 
@@ -435,40 +532,72 @@ class AIAPIManager:
 
         image_paths = image_paths or []
         file_contents = file_contents or {}
-
-        errors = []
-        has_valid_key = False
         needs_vision = len(image_paths) > 0
 
+        errors = []
+
+        # Prepare configs
+        multimodal_configs = []
         for i, config in enumerate(self.api_configs):
             api_key = config.get('api_key', '').strip()
             model_name = config.get('model_name', '').strip()
-            provider = config.get('provider', 'Auto')
+            provider_setting = config.get('provider', 'Auto')
 
             if not api_key or not model_name:
                 continue
 
-            target_provider = self._identify_provider(model_name, api_key) if provider == 'Auto' else provider.lower()
+            target_provider = self._identify_provider(model_name, api_key) if provider_setting == 'Auto' else provider_setting.lower()
 
             # If we have images, check vision capability
             if needs_vision and not MultimodalProcessor.is_vision_capable(model_name, target_provider):
                 continue
 
-            has_valid_key = True
+            multimodal_configs.append({
+                'config': config,
+                'provider': target_provider,
+                'api_key': api_key,
+                'model_name': model_name
+            })
 
-            try:
-                return self._generate_content_multimodal(
-                    target_provider, api_key, model_name, prompt, image_paths, file_contents
-                )
-            except Exception as e:
-                errors.append(f"{model_name}: {str(e)}")
-                continue
-
-        if not has_valid_key:
+        if not multimodal_configs:
             if needs_vision:
                 raise Exception("No configured API supports vision. Please use a vision-capable model (e.g., Gemini 2.0 Flash, GPT-4o).")
             else:
                 raise Exception("No valid API key configured. Please add an API key in Settings.")
+
+        # Sort by provider health if health manager is available
+        if self.health_manager:
+            providers = list(set(c['provider'] for c in multimodal_configs))
+            sorted_providers = self.health_manager.get_priority_sorted_providers(providers)
+            provider_priority = {p: i for i, p in enumerate(sorted_providers)}
+            multimodal_configs.sort(key=lambda c: provider_priority.get(c['provider'], 999))
+
+        # Try each config
+        for item in multimodal_configs:
+            target_provider = item['provider']
+            api_key = item['api_key']
+            model_name = item['model_name']
+
+            start_time = time.time()
+            try:
+                result = self._generate_content_multimodal(
+                    target_provider, api_key, model_name, prompt, image_paths, file_contents
+                )
+
+                # Record success
+                if self.health_manager:
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    self.health_manager.record_success(target_provider, response_time_ms)
+
+                return result
+
+            except Exception as e:
+                # Record failure
+                if self.health_manager:
+                    self.health_manager.record_failure(target_provider)
+
+                errors.append(f"{model_name}: {str(e)}")
+                continue
 
         raise Exception("All API calls failed.\n" + "\n".join(errors))
 

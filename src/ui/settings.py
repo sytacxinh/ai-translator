@@ -25,6 +25,7 @@ from src.constants import VERSION, GITHUB_REPO, LANGUAGES, PROVIDERS_LIST
 from src.core.api_manager import AIAPIManager
 from src.utils.updates import check_for_updates, download_and_install_update, execute_update
 from src.core.multimodal import MultimodalProcessor
+from src.core.auth import require_auth
 
 
 class SettingsWindow:
@@ -150,20 +151,30 @@ class SettingsWindow:
             is_primary = (i == 0)
             self._add_api_row(self.api_list_frame, config.get('model_name', ''), config.get('api_key', ''), config.get('provider', 'Auto'), is_primary)
 
-        # Buttons frame: Delete All (left) + Add Backup (right)
+        # Buttons frame: Show All + Delete All (left) + Add Backup (right)
         btn_frame = ttk.Frame(api_container)
         btn_frame.pack(fill=X, pady=15)
 
+        # Track show all state
+        self.show_all_state = {'showing': False, 'authenticated': False}
+
         if HAS_TTKBOOTSTRAP:
+            self.show_all_btn = ttk.Button(btn_frame, text="Show All API Keys",
+                       command=self._toggle_show_all_keys,
+                       bootstyle="secondary-outline", width=18)
+            self.show_all_btn.pack(side=LEFT)
             ttk.Button(btn_frame, text="Delete All API Keys",
                        command=self._delete_all_keys,
-                       bootstyle="danger", width=18).pack(side=LEFT)
+                       bootstyle="danger", width=18).pack(side=LEFT, padx=(10, 0))
             self.add_api_btn = ttk.Button(btn_frame, text="+ Add Backup Key",
                                         command=lambda: self._add_new_api_row(self.api_list_frame, canvas),
                                         bootstyle="success-outline", width=18)
         else:
+            self.show_all_btn = ttk.Button(btn_frame, text="Show All API Keys",
+                       command=self._toggle_show_all_keys, width=18)
+            self.show_all_btn.pack(side=LEFT)
             ttk.Button(btn_frame, text="Delete All API Keys",
-                       command=self._delete_all_keys, width=18).pack(side=LEFT)
+                       command=self._delete_all_keys, width=18).pack(side=LEFT, padx=(10, 0))
             self.add_api_btn = ttk.Button(btn_frame, text="+ Add Backup Key",
                                         command=lambda: self._add_new_api_row(self.api_list_frame, canvas), width=18)
         self.add_api_btn.pack(side=LEFT, padx=10)
@@ -306,20 +317,39 @@ class SettingsWindow:
         key_entry.pack(side=LEFT, padx=(3, 5))
 
         # Store show state for this row
-        show_state = {'showing': False}
+        show_state = {'showing': False, 'authenticated': False}
 
         # Show button (per-row)
         def toggle_show_key():
             if show_state['showing']:
+                # Hide the key
                 key_entry.config(show="*")
                 show_btn.config(text="Show")
                 if HAS_TTKBOOTSTRAP: show_btn.configure(bootstyle="secondary-outline")
                 show_state['showing'] = False
             else:
+                # Show the key - require authentication first
+                # Skip auth if already authenticated via Show All or this row
+                if not show_state['authenticated'] and not self.show_all_state.get('authenticated', False):
+                    # Check if there's actually a key to show
+                    if not key_var.get().strip():
+                        return
+
+                    # Require Windows authentication
+                    if not require_auth(self.window):
+                        return  # Auth failed or cancelled
+
+                    # Mark as authenticated for this session (both row and global)
+                    show_state['authenticated'] = True
+                    self.show_all_state['authenticated'] = True
+
                 key_entry.config(show="")
                 show_btn.config(text="Hide")
-                if HAS_TTKBOOTSTRAP: show_btn.configure(bootstyle="warning") # Warning color to encourage hiding
+                if HAS_TTKBOOTSTRAP: show_btn.configure(bootstyle="warning")
                 show_state['showing'] = True
+
+            # Sync "Show All" button state based on all rows
+            self._sync_show_all_button_state()
 
         if HAS_TTKBOOTSTRAP:
             show_btn = ttk.Button(row, text="Show", command=toggle_show_key,
@@ -377,7 +407,9 @@ class SettingsWindow:
             'key_entry': key_entry,
             'is_primary': is_primary,
             'test_label': test_label,
-            'model_placeholder': model_placeholder
+            'model_placeholder': model_placeholder,
+            'show_btn': show_btn,
+            'show_state': show_state
         })
         # Only update button if it exists (button is created after initial rows)
         if hasattr(self, 'add_api_btn'):
@@ -412,7 +444,7 @@ class SettingsWindow:
 
         # Save immediately as requested
         self._save_api_keys_to_config(secure=True)
-        
+
         # Force garbage collection to clear strings from RAM immediately
         gc.collect()
 
@@ -421,6 +453,86 @@ class SettingsWindow:
         else:
             from tkinter import messagebox
             messagebox.showinfo("Keys Cleared", "All API keys have been cleared and saved.", parent=self.window)
+
+    def _toggle_show_all_keys(self):
+        """Toggle showing/hiding all API keys with authentication."""
+        if self.show_all_state['showing']:
+            # Hide all keys
+            for row in self.api_rows:
+                row['key_entry'].config(show="*")
+                # Update individual show button state and text
+                if 'show_state' in row:
+                    row['show_state']['showing'] = False
+                if 'show_btn' in row:
+                    row['show_btn'].config(text="Show")
+                    if HAS_TTKBOOTSTRAP:
+                        row['show_btn'].configure(bootstyle="secondary-outline")
+
+            self.show_all_btn.config(text="Show All API Keys")
+            if HAS_TTKBOOTSTRAP:
+                self.show_all_btn.configure(bootstyle="secondary-outline")
+            self.show_all_state['showing'] = False
+        else:
+            # Check if there are any keys to show
+            has_keys = any(row['key_var'].get().strip() for row in self.api_rows)
+            if not has_keys:
+                if HAS_TTKBOOTSTRAP:
+                    Messagebox.show_info("No API keys to show.", title="No Keys", parent=self.window)
+                else:
+                    from tkinter import messagebox
+                    messagebox.showinfo("No Keys", "No API keys to show.", parent=self.window)
+                return
+
+            # Require authentication if not already authenticated
+            if not self.show_all_state['authenticated']:
+                if not require_auth(self.window):
+                    return  # Auth failed or cancelled
+
+                # Mark as authenticated for this session
+                self.show_all_state['authenticated'] = True
+
+            # Show all keys and update individual buttons
+            for row in self.api_rows:
+                row['key_entry'].config(show="")
+                # Update individual show button state and text
+                if 'show_state' in row:
+                    row['show_state']['showing'] = True
+                    row['show_state']['authenticated'] = True  # Mark row as authenticated too
+                if 'show_btn' in row:
+                    row['show_btn'].config(text="Hide")
+                    if HAS_TTKBOOTSTRAP:
+                        row['show_btn'].configure(bootstyle="warning")
+
+            self.show_all_btn.config(text="Hide All API Keys")
+            if HAS_TTKBOOTSTRAP:
+                self.show_all_btn.configure(bootstyle="warning")
+            self.show_all_state['showing'] = True
+
+    def _sync_show_all_button_state(self):
+        """Sync 'Show All' button state based on individual row states."""
+        if not self.api_rows:
+            return
+
+        # Check if all rows with keys are showing
+        rows_with_keys = [row for row in self.api_rows if row['key_var'].get().strip()]
+        if not rows_with_keys:
+            return
+
+        all_showing = all(row.get('show_state', {}).get('showing', False) for row in rows_with_keys)
+        all_hidden = all(not row.get('show_state', {}).get('showing', False) for row in rows_with_keys)
+
+        if all_showing and not self.show_all_state['showing']:
+            # All individual buttons are "Hide" -> update "Show All" to "Hide All"
+            self.show_all_btn.config(text="Hide All API Keys")
+            if HAS_TTKBOOTSTRAP:
+                self.show_all_btn.configure(bootstyle="warning")
+            self.show_all_state['showing'] = True
+        elif all_hidden and self.show_all_state['showing']:
+            # All individual buttons are "Show" -> update "Hide All" to "Show All"
+            self.show_all_btn.config(text="Show All API Keys")
+            if HAS_TTKBOOTSTRAP:
+                self.show_all_btn.configure(bootstyle="secondary-outline")
+            self.show_all_state['showing'] = False
 
     def _save_api_keys_to_config(self, secure=False):
         """Save current API keys to config."""

@@ -47,7 +47,9 @@ class Config:
         # Note: vision_enabled and file_processing_enabled are now auto-managed
         # based on API capabilities detected during testing
         "vision_enabled": False,
-        "file_processing_enabled": False
+        "file_processing_enabled": False,
+        # Provider health tracking for smart fallback
+        "provider_health": {}
     }
 
     def __init__(self):
