@@ -2,6 +2,8 @@
 System Tray Manager for CrossTrans.
 Handles system tray icon and menu.
 """
+import os
+import sys
 import webbrowser
 from typing import Callable, Dict, Optional
 
@@ -9,6 +11,24 @@ from pystray import Icon, MenuItem, Menu
 from PIL import Image, ImageDraw
 
 from src.constants import VERSION, FEEDBACK_URL
+
+
+def get_resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and PyInstaller bundle.
+
+    Args:
+        relative_path: Path relative to the app root
+
+    Returns:
+        Absolute path to the resource
+    """
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    else:
+        # Running as script - go up from src/ui/ to project root
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base_path, relative_path)
 
 
 class TrayManager:
@@ -49,9 +69,25 @@ class TrayManager:
         Returns:
             PIL Image for the tray icon
         """
+        # Try to load CrossTrans logo
+        icon_path = get_resource_path(os.path.join('src', 'assets', 'CrossTrans.png'))
+
+        if os.path.exists(icon_path):
+            try:
+                image = Image.open(icon_path)
+                # Resize to 64x64 for tray icon (with high quality)
+                image = image.resize((64, 64), Image.Resampling.LANCZOS)
+                # Convert to RGBA if needed (for transparency support)
+                if image.mode != 'RGBA':
+                    image = image.convert('RGBA')
+                return image
+            except Exception:
+                pass  # Fall back to programmatic icon
+
+        # Fallback: Create simple icon if logo not found
         image = Image.new('RGB', (64, 64), color='#0d6efd')
         draw = ImageDraw.Draw(image)
-        draw.text((18, 18), "T", fill='white')
+        draw.text((18, 18), "CT", fill='white')
         return image
 
     def _build_menu_items(self) -> list:

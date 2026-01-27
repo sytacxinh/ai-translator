@@ -40,8 +40,10 @@ env/
 .DS_Store
 Thumbs.db
 desktop.ini
+nul
 
 # Logs
+logs/
 *.log
 
 # Backup files
@@ -57,13 +59,16 @@ backup/
 .claude/
 
 # Local development scripts (not needed for users)
-nul
 restart.bat
 run_silent.vbs
 push_to_github.bat
 install.bat
 memo.txt
 run_with_restart.py
+
+# Deprecated/old files
+AITranslator.spec
+AI_CONTEXT_PROMPT.md
 
 # Test outputs
 tests/__pycache__/
@@ -74,3 +79,6 @@ htmlcov/
 # Config backups (may contain API keys)
 *_backup.json
 config_backup_*.json
+
+# User config (created at runtime, may contain API keys)
+translator_config.json
